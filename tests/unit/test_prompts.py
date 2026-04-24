@@ -247,6 +247,10 @@ class TestNormalizePromptResult:
         msg = {"role": "assistant", "content": {"type": "text", "text": "hi"}}
         assert _normalize_prompt_result(msg) == [msg]
 
+    def test_dict_missing_keys_coerced(self) -> None:
+        result = _normalize_prompt_result({"text": "raw"})
+        assert result == [{"role": "user", "content": {"type": "text", "text": "{'text': 'raw'}"}}]
+
     def test_list_passes_through(self) -> None:
         msgs = [
             {"role": "user", "content": {"type": "text", "text": "q"}},
@@ -514,3 +518,28 @@ class TestHandlerBasedPromptDiscovery:
         plugin = LitestarMCP(config=MCPConfig())
         app = Litestar(route_handlers=[review_handler], plugins=[plugin])
         assert "code_review" in plugin.discovered_prompts
+
+    def test_handler_prompt_get_e2e(self) -> None:
+        """Execute a handler-based prompt via prompts/get end-to-end."""
+
+        @get("/greet-handler", mcp_prompt="handler_greet", mcp_prompt_description="Handler greet")
+        async def greet_handler() -> dict:
+            return {
+                "messages": [{"role": "assistant", "content": {"type": "text", "text": "Handler says hi"}}]
+            }
+
+        plugin = LitestarMCP(config=MCPConfig())
+        app = Litestar(route_handlers=[greet_handler], plugins=[plugin])
+        with TestClient(app) as client:
+            session_id = _init_session(client)
+            data = _jsonrpc(
+                client,
+                "prompts/get",
+                params={"name": "handler_greet"},
+                session_id=session_id,
+            )
+            result = data["result"]
+            assert result["description"] == "Handler greet"
+            assert len(result["messages"]) == 1
+            assert result["messages"][0]["role"] == "assistant"
+            assert result["messages"][0]["content"]["text"] == "Handler says hi"

@@ -128,6 +128,7 @@ class LitestarMCP(InitPluginProtocol, CLIPlugin):
                             handler,
                             title=metadata.get("title"),
                             description=metadata.get("description"),
+                            arguments=metadata.get("arguments"),
                             icons=metadata.get("icons"),
                         )
                 elif handler.opt:

@@ -116,7 +116,7 @@ def build_mcp_server_manifest(
     app: Litestar,
     discovered_tools: dict[str, Any],
     discovered_resources: dict[str, Any],
-    discovered_prompts: dict[str, Any] | None = None,
+    discovered_prompts: dict[str, Any],
 ) -> dict[str, Any]:
     """Build an experimental MCP server manifest."""
     tools = []
@@ -140,6 +140,9 @@ def build_mcp_server_manifest(
             prompt_entry: dict[str, Any] = {"name": registration.name}
             if registration.description is not None:
                 prompt_entry["description"] = registration.description
+            arguments = registration.get_arguments()
+            if arguments:
+                prompt_entry["arguments"] = arguments
             prompts_list.append(prompt_entry)
 
     return {

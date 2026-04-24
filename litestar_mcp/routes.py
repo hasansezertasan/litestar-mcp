@@ -3,6 +3,7 @@
 
 import asyncio
 import contextlib
+import inspect
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -312,14 +313,23 @@ def _normalize_prompt_result(result: Any) -> list[dict[str, Any]]:
     if isinstance(result, str):
         return [{"role": "user", "content": {"type": "text", "text": result}}]
     if isinstance(result, dict):
-        if "role" not in result or "content" not in result:
-            _logger.warning("Prompt returned dict missing 'role'/'content' keys: %s", sorted(result.keys()))
-        return [result]
+        if "role" in result and "content" in result:
+            return [result]
+        _logger.warning("Prompt returned dict missing 'role'/'content' keys: %s", sorted(result.keys()))
+        return [{"role": "user", "content": {"type": "text", "text": str(result)}}]
     if isinstance(result, list):
+        coerced: list[dict[str, Any]] = []
         for i, item in enumerate(result):
-            if not isinstance(item, dict):
-                _logger.warning("Prompt returned list with non-dict element at index %d: %s", i, type(item).__name__)
-        return result
+            if isinstance(item, dict):
+                coerced.append(item)
+            else:
+                _logger.warning(
+                    "Prompt returned list with non-dict element at index %d (%s), coercing to string",
+                    i,
+                    type(item).__name__,
+                )
+                coerced.append({"role": "user", "content": {"type": "text", "text": str(item)}})
+        return coerced
     _logger.warning("Prompt returned unexpected type %s, coercing to string", type(result).__name__)
     return [{"role": "user", "content": {"type": "text", "text": str(result)}}]
 
@@ -713,13 +723,10 @@ def build_jsonrpc_router(
             return handler_result
 
         if registration.fn is not None:
-            import asyncio as _asyncio
-            import inspect as _inspect
-
             # Validate arguments before calling to distinguish argument
             # mismatches (INVALID_PARAMS) from TypeErrors inside the function.
             try:
-                _inspect.signature(registration.fn).bind(**prompt_args)
+                inspect.signature(registration.fn).bind(**prompt_args)
             except TypeError as exc:
                 raise JSONRPCErrorException(
                     JSONRPCError(code=INVALID_PARAMS, message=f"Invalid prompt arguments: {exc!s}")
@@ -727,7 +734,7 @@ def build_jsonrpc_router(
 
             try:
                 result = registration.fn(**prompt_args)
-                if _asyncio.iscoroutine(result):
+                if asyncio.iscoroutine(result):
                     result = await result
             except Exception as exc:
                 _logger.exception("Prompt function execution failed: %s", prompt_name)
@@ -736,11 +743,11 @@ def build_jsonrpc_router(
                 ) from exc
             messages = _normalize_prompt_result(result)
             get_result: dict[str, Any] = {"messages": messages}
-            if registration.description is not None:
+            if registration.description is not None and "description" not in get_result:
                 get_result["description"] = registration.description
             return get_result
 
-        raise JSONRPCErrorException(
+        raise JSONRPCErrorException(  # pragma: no cover
             JSONRPCError(code=INTERNAL_ERROR, message=f"Prompt has no callable: {prompt_name}")
         )
 

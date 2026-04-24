@@ -7,12 +7,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-_logger = logging.getLogger(__name__)
-
 from litestar.handlers import BaseRouteHandler
 
 from litestar_mcp.sse import SSEManager
 from litestar_mcp.utils import get_mcp_metadata, parse_template
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +261,7 @@ class Registry:
         *,
         title: str | None = None,
         description: str | None = None,
+        arguments: list[dict[str, Any]] | None = None,
         icons: list[dict[str, Any]] | None = None,
     ) -> None:
         """Register a route-handler-based prompt.
@@ -277,6 +278,8 @@ class Registry:
             handler: The Litestar route handler.
             title: Optional human-readable display name.
             description: Optional description.
+            arguments: Explicit argument definitions. When ``None``,
+                handler-based prompts report an empty argument list.
             icons: Optional list of icon objects for UI display.
         """
         if name in self._prompts:
@@ -288,6 +291,7 @@ class Registry:
             handler=handler,
             title=title if title is not None else metadata.get("title"),
             description=desc,
+            arguments=arguments if arguments is not None else metadata.get("arguments"),
             icons=icons if icons is not None else metadata.get("icons"),
         )
 

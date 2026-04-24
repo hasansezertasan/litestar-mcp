@@ -118,6 +118,33 @@ class TestPromptRegistration:
         reg = PromptRegistration(name="test", fn=lambda: "", icons=icons)
         assert reg.icons == icons
 
+    def test_post_init_raises_when_both_fn_and_handler(self) -> None:
+        with pytest.raises(ValueError, match="cannot have both"):
+            PromptRegistration(name="x", fn=lambda: "", handler=lambda: "")  # type: ignore[arg-type]
+
+    def test_post_init_raises_when_neither_fn_nor_handler(self) -> None:
+        with pytest.raises(ValueError, match="must have either"):
+            PromptRegistration(name="x")
+
+    def test_handler_only_returns_empty_arguments(self) -> None:
+        @get("/")
+        def handler() -> str:
+            return ""
+
+        reg = PromptRegistration(name="x", handler=handler)
+        assert reg.get_arguments() == []
+
+    def test_get_arguments_skips_var_positional_and_var_keyword(self) -> None:
+        def fn(a: str, *args: str, **kwargs: str) -> str:
+            return ""
+
+        reg = PromptRegistration(name="test", fn=fn)
+        args = reg.get_arguments()
+        names = [arg["name"] for arg in args]
+        assert "a" in names
+        assert "args" not in names
+        assert "kwargs" not in names
+
 
 # ---------------------------------------------------------------------------
 # Docstring argument parsing tests
@@ -176,6 +203,42 @@ class TestParseDocstringArgs:
         result = _parse_docstring_args(doc)
         assert result == {"x": "A param."}
         assert "Returns" not in result
+
+    def test_arguments_header(self) -> None:
+        doc = """Fn.
+
+        Arguments:
+            x: First.
+        """
+        assert _parse_docstring_args(doc) == {"x": "First."}
+
+    def test_params_header(self) -> None:
+        doc = """Fn.
+
+        Params:
+            x: First.
+        """
+        assert _parse_docstring_args(doc) == {"x": "First."}
+
+    def test_parameters_header(self) -> None:
+        doc = """Fn.
+
+        Parameters:
+            x: First.
+        """
+        assert _parse_docstring_args(doc) == {"x": "First."}
+
+    def test_stops_at_notes_section(self) -> None:
+        doc = """Fn.
+
+        Args:
+            x: A param.
+
+        Notes:
+            Some notes.
+        """
+        result = _parse_docstring_args(doc)
+        assert result == {"x": "A param."}
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +533,23 @@ class TestPromptsGetRPC:
             assert "error" in data
             assert "Missing required param" in data["error"]["message"]
 
+    def test_get_prompt_arguments_must_be_object(self) -> None:
+        @mcp_prompt(name="typed")
+        def typed(name: str) -> str:
+            return name
+
+        app = _make_app_with_prompts(typed)
+        with TestClient(app) as client:
+            session_id = _init_session(client)
+            data = _jsonrpc(
+                client,
+                "prompts/get",
+                params={"name": "typed", "arguments": []},
+                session_id=session_id,
+            )
+            assert "error" in data
+            assert data["error"]["code"] == -32602
+
     def test_get_prompt_invalid_arguments_error(self) -> None:
         @mcp_prompt(name="strict")
         def strict(required_arg: str) -> str:
@@ -519,8 +599,8 @@ class TestHandlerBasedPromptDiscovery:
         app = Litestar(route_handlers=[review_handler], plugins=[plugin])
         assert "code_review" in plugin.discovered_prompts
 
-    def test_handler_prompt_get_e2e(self) -> None:
-        """Execute a handler-based prompt via prompts/get end-to-end."""
+    def test_handler_prompt_get_e2e_dict_response(self) -> None:
+        """Handler returns {"messages": ...} — passed through directly."""
 
         @get("/greet-handler", mcp_prompt="handler_greet", mcp_prompt_description="Handler greet")
         async def greet_handler() -> dict:
@@ -543,3 +623,26 @@ class TestHandlerBasedPromptDiscovery:
             assert len(result["messages"]) == 1
             assert result["messages"][0]["role"] == "assistant"
             assert result["messages"][0]["content"]["text"] == "Handler says hi"
+
+    def test_handler_prompt_get_e2e_normalized_response(self) -> None:
+        """Handler returns dict without 'messages' key — normalized via _normalize_prompt_result."""
+
+        @get("/raw-handler", mcp_prompt="raw_prompt", mcp_prompt_description="Raw prompt")
+        async def raw_handler() -> dict:
+            return {"role": "user", "content": {"type": "text", "text": "Normalized"}}
+
+        plugin = LitestarMCP(config=MCPConfig())
+        app = Litestar(route_handlers=[raw_handler], plugins=[plugin])
+        with TestClient(app) as client:
+            session_id = _init_session(client)
+            data = _jsonrpc(
+                client,
+                "prompts/get",
+                params={"name": "raw_prompt"},
+                session_id=session_id,
+            )
+            result = data["result"]
+            assert result["description"] == "Raw prompt"
+            assert result["messages"] == [
+                {"role": "user", "content": {"type": "text", "text": "Normalized"}}
+            ]

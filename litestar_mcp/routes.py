@@ -315,7 +315,7 @@ def _normalize_prompt_result(result: Any) -> list[dict[str, Any]]:
     if isinstance(result, dict):
         if "role" in result and "content" in result:
             return [result]
-        _logger.warning("Prompt returned dict missing 'role'/'content' keys: %s", sorted(result.keys()))
+        _logger.warning("Prompt returned dict missing 'role'/'content' keys: %s", list(result.keys()))
         return [{"role": "user", "content": {"type": "text", "text": str(result)}}]
     if isinstance(result, list):
         coerced: list[dict[str, Any]] = []

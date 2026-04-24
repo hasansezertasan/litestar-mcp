@@ -129,8 +129,11 @@ class PromptRegistration:
             return []
         sig = inspect.signature(target)
         doc_descriptions = _parse_docstring_args(getattr(target, "__doc__", None))
+        _skip = {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
         args: list[dict[str, Any]] = []
         for param_name, param in sig.parameters.items():
+            if param.kind in _skip or param_name == "self":
+                continue
             arg: dict[str, Any] = {"name": param_name}
             desc = doc_descriptions.get(param_name)
             if desc:
